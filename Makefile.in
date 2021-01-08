@@ -2,13 +2,7 @@ srcdir := @abs_top_srcdir@
 builddir := @abs_top_builddir@
 INSTALL_DIR := @prefix@
 
-PACKAGES :=
-
-DISTDIR ?= /var/cache/distfiles
-GNU_MIRROR := http://mirrors.kernel.org/gnu
-gcc_url := $(GNU_MIRROR)/gcc/gcc-$(gcc_version)/gcc-$(gcc_version).tar.gz
-newlib_url := ftp://sourceware.org/pub/newlib/newlib-$(newlib_version).tar.gz
-
+#FIXME! add WITH_FPU
 WITH_CPU ?= @WITH_CPU@
 SYSROOT := $(INSTALL_DIR)/sysroot
 
@@ -32,44 +26,220 @@ export PATH AWK SED
 WERROR_FLAG := @werror_flag@
 MULTILIB_FLAGS := @multilib_flags@
 GCC_CHECKING_FLAGS := @gcc_checking@
-CONFIGURE_HOST = @configure_host@
+
+make_tuple = @arc_target@-$(1)
+LINUX_TUPLE  ?= $(call make_tuple,linux-gnu)
+ifeq (@arc_target@,arc)
+NEWLIB_TUPLE ?= $(call make_tuple,elf32)
+else
+NEWLIB_TUPLE ?= $(call make_tuple,elf)
+endif
+LINUX_HEADERS_SRCDIR := @with_linux_headers_src@
 
 CFLAGS_FOR_TARGET := $(CFLAGS_FOR_TARGET_EXTRA)
+CXXFLAGS_FOR_TARGET := $(CXXFLAGS_FOR_TARGET_EXTRA)
 ASFLAGS_FOR_TARGET := $(ASFLAGS_FOR_TARGET_EXTRA)
+# --with-expat is required to enable XML support used by OpenOCD.
+BINUTILS_TARGET_FLAGS := --with-expat=yes $(BINUTILS_TARGET_FLAGS_EXTRA)
+BINUTILS_NATIVE_FLAGS := $(BINUTILS_NATIVE_FLAGS_EXTRA)
+GDB_TARGET_FLAGS := --with-expat=yes $(GDB_TARGET_FLAGS_EXTRA)
+GDB_NATIVE_FLAGS := $(GDB_NATIVE_FLAGS_EXTRA)
+
+GLIBC_TARGET_FLAGS := $(GLIBC_TARGET_FLAGS_EXTRA)
+GLIBC_CC_FOR_TARGET ?= $(LINUX_TUPLE)-gcc
+GLIBC_CXX_FOR_TARGET ?= $(LINUX_TUPLE)-g++
+
+NEWLIB_CC_FOR_TARGET ?= $(NEWLIB_TUPLE)-gcc
+NEWLIB_CXX_FOR_TARGET ?= $(NEWLIB_TUPLE)-g++
+
+CONFIGURE_HOST = @configure_host@
 
 all: @default_target@
 newlib: stamps/build-gcc-newlib-stage2
+linux: stamps/build-gcc-linux-stage2
+#TODO! linux-native gdb
 
-$(addprefix src/original-,$(PACKAGES)):
-	mkdir -p src
-	rm -rf $@ $(subst original-,,$@)-*
-	cd src && (cat $(DISTDIR)/$(subst src/original-,,$@)-$($(subst src/original-,,$@)_version).tar.gz || @FETCHER@ $($(subst src/original-,,$@)_url)) | tar zxf -
-	mv $(subst original-,,$@)-$($(subst src/original-,,$@)_version) $@
+stamps/check-write-permission:
+	mkdir -p $(INSTALL_DIR)/.test || \
+		(echo "Sorry, you don't have permission to write to" \
+		 "'$(INSTALL_DIR)', use --prefix to specify" \
+		 "another path, or use 'sudo make' if you *REALLY* want to" \
+		 "install into '$(INSTALL_DIR)'" && exit 1)
+	rm -r $(INSTALL_DIR)/.test
+	mkdir -p $(dir $@) && touch $@
 
-$(addprefix src/,$(PACKAGES)): src/%: src/original-%
-	rm -rf $@ $@.tmp
-	cp -a $< $@.tmp
-	$(srcdir)/scripts/cp_s $(srcdir)/$(notdir $@) $@.tmp
-	cd $@.tmp && patch -p1 < $(srcdir)/patches/$(notdir $@)
-	if test -f $@.tmp/contrib/download_prerequisites && test "@NEED_GCC_EXTERNAL_LIBRARIES@" == "true"; then cd $@.tmp && ./contrib/download_prerequisites; fi
-	mv $@.tmp $@
+stamps/build-linux-headers:
+	mkdir -p $(SYSROOT)/usr/
+ifdef LINUX_HEADERS_SRCDIR
+	cp -a $(LINUX_HEADERS_SRCDIR) $(SYSROOT)/usr/
+else
+	cp -a $(srcdir)/linux-headers/include $(SYSROOT)/usr/
+endif
+	mkdir -p $(dir $@) && touch $@
 
-.PHONY: patches $(addprefix $(srcdir)/patches/,$(PACKAGES))
-$(addprefix $(srcdir)/patches/,$(PACKAGES)): $(srcdir)/patches/%: src/%
-	-cd src/$(notdir $@) && rm `cd $(srcdir)/$(notdir $@) && find . -type f`
-	-cd src && diff --exclude=manual --exclude=autom4te.cache -rupN original-$(notdir $@) $(notdir $@) | filterdiff --remove-timestamps > $@
-	$(srcdir)/scripts/cp_s $(srcdir)/$(notdir $@) $<
 
-patches: $(addprefix $(srcdir)/patches/,$(PACKAGES))
+#
+# GLIBC
+#
 
-stamps/build-binutils-newlib: $(srcdir)/arc-binutils-gdb
+stamps/build-binutils-linux: $(srcdir)/arc-binutils-gdb stamps/check-write-permission
+	rm -rf $@ $(notdir $@)
+	mkdir $(notdir $@)
+# CC_FOR_TARGET is required for the ld testsuite.
+	cd $(notdir $@) && CC_FOR_TARGET=$(GLIBC_CC_FOR_TARGET) $</configure \
+		--target=$(LINUX_TUPLE) \
+		$(CONFIGURE_HOST) \
+		--prefix=$(INSTALL_DIR) \
+		--with-sysroot=$(SYSROOT) \
+		$(MULTILIB_FLAGS) \
+		$(WERROR_FLAG) \
+		--disable-nls \
+		$(BINUTILS_TARGET_FLAGS) \
+		--disable-gdb \
+		--disable-sim \
+		--disable-libdecnumber \
+		--disable-readline
+	$(MAKE) -C $(notdir $@)
+	$(MAKE) -C $(notdir $@) install
+	mkdir -p $(dir $@) && touch $@
+
+stamps/build-gdb-linux: $(srcdir)/arc-binutils-gdb
+	rm -rf $@ $(notdir $@)
+	mkdir $(notdir $@)
+# CC_FOR_TARGET is required for the ld testsuite.
+	cd $(notdir $@) && CC_FOR_TARGET=$(GLIBC_CC_FOR_TARGET) $</configure \
+		--target=$(LINUX_TUPLE) \
+		$(CONFIGURE_HOST) \
+		--prefix=$(INSTALL_DIR) \
+		--with-sysroot=$(SYSROOT) \
+		$(MULTILIB_FLAGS) \
+		$(WERROR_FLAG) \
+		--disable-nls \
+		$(GDB_TARGET_FLAGS) \
+		--enable-gdb \
+		--disable-gas \
+		--disable-binutils \
+		--disable-ld \
+		--disable-gold \
+		--disable-gprof
+	$(MAKE) -C $(notdir $@)
+	$(MAKE) -C $(notdir $@) install
+	mkdir -p $(dir $@) && touch $@
+
+stamps/build-glibc-linux-headers: $(srcdir)/arc-glibc stamps/build-gcc-linux-stage1
+	rm -rf $@ $(notdir $@)
+	mkdir $(notdir $@)
+	cd $(notdir $@) && CC="$(GLIBC_CC_FOR_TARGET)" $</configure \
+		--host=$(LINUX_TUPLE) \
+		--prefix=$(SYSROOT)/usr \
+		--enable-shared \
+		--with-headers=$(LINUX_HEADERS_SRCDIR) \
+		--disable-multilib \
+		--enable-kernel=3.0.0
+	$(MAKE) -C $(notdir $@) install-headers
+	mkdir -p $(dir $@) && touch $@
+
+stamps/build-glibc-linux: $(srcdir)/arc-glibc stamps/build-gcc-linux-stage1
+	rm -rf $@ $(notdir $@)
+	mkdir $(notdir $@)
+	cd $(notdir $@) && \
+		CC="$(GLIBC_CC_FOR_TARGET) $($@_CFLAGS)" \
+		CXX="$(GLIBC_CXX_FOR_TARGET) $($@_CFLAGS)" \
+		CFLAGS="$(CFLAGS_FOR_TARGET) -g -O2 $($@_CFLAGS)" \
+		CXXFLAGS="$(CXXFLAGS_FOR_TARGET) -g -O2 $($@_CFLAGS)" \
+		ASFLAGS="$(ASFLAGS_FOR_TARGET) $($@_CFLAGS)" \
+		$</configure \
+		--host=${LINUX_TUPLE} \
+		--prefix=/usr \
+		$(WERROR_FLAG) \
+		--enable-shared \
+		--enable-obsolete-rpc \
+		--with-headers=$(LINUX_HEADERS_SRCDIR) \
+		$(MULTILIB_FLAGS) \
+		$(GLIBC_TARGET_FLAGS)
+	$(MAKE) -C $(notdir $@)
+	+flock $(SYSROOT)/.lock $(MAKE) -C $(notdir $@) install install_root=$(SYSROOT)
+	mkdir -p $(dir $@) && touch $@
+
+stamps/build-gcc-linux-stage1: $(srcdir)/arc-gcc stamps/build-binutils-linux \
+                               stamps/build-linux-headers
+	if test -f $</contrib/download_prerequisites && test "@NEED_GCC_EXTERNAL_LIBRARIES@" = "true"; then cd $< && ./contrib/download_prerequisites; fi
 	rm -rf $@ $(notdir $@)
 	mkdir $(notdir $@)
 	cd $(notdir $@) && $</configure \
-		--target=arc-elf32 \
+		--target=$(LINUX_TUPLE) \
+		$(CONFIGURE_HOST) \
 		--prefix=$(INSTALL_DIR) \
-		--disable-gdb \
+		--with-sysroot=$(SYSROOT) \
+		--with-newlib \
+		--without-headers \
+		--disable-shared \
+		--disable-threads \
+		@with_system_zlib@ \
+		--enable-tls \
+		--enable-languages=c \
+		--disable-libatomic \
+		--disable-libmudflap \
+		--disable-libssp \
+		--disable-libquadmath \
+		--disable-libgomp \
+		--disable-nls \
+		--disable-bootstrap \
+		--disable-lto \
+		--src=$(gccsrcdir) \
+		$(GCC_CHECKING_FLAGS) \
 		$(MULTILIB_FLAGS) \
+		CFLAGS_FOR_TARGET="-O2 $(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="-O2 $(CXXFLAGS_FOR_TARGET)" \
+		--with-gnu-as \
+		--with-gnu-ld
+	$(MAKE) -C $(notdir $@) inhibit-libc=true all-gcc
+	$(MAKE) -C $(notdir $@) inhibit-libc=true install-gcc
+	$(MAKE) -C $(notdir $@) inhibit-libc=true all-target-libgcc
+	$(MAKE) -C $(notdir $@) inhibit-libc=true install-target-libgcc
+	mkdir -p $(dir $@) && touch $@
+
+stamps/build-gcc-linux-stage2: $(srcdir)/arc-gcc stamps/build-glibc-linux \
+                               stamps/build-glibc-linux-headers
+	rm -rf $@ $(notdir $@)
+	mkdir $(notdir $@)
+	cd $(notdir $@) && $</configure \
+		--target=$(LINUX_TUPLE) \
+		$(CONFIGURE_HOST) \
+		--prefix=$(INSTALL_DIR) \
+		--with-sysroot=$(SYSROOT) \
+		@with_system_zlib@ \
+		--enable-shared \
+		--enable-tls \
+		--enable-languages=c,c++ \
+		--disable-libmudflap \
+		--disable-libssp \
+		--disable-libquadmath \
+		--disable-nls \
+		--disable-bootstrap \
+		--src=$(gccsrcdir) \
+		$(GCC_CHECKING_FLAGS) \
+		$(MULTILIB_FLAGS) \
+		$(WITH_ABI) \
+		CFLAGS_FOR_TARGET="-O2 $(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="-O2 $(CXXFLAGS_FOR_TARGET)" \
+		--with-gnu-as \
+		--with-gnu-ld
+	$(MAKE) -C $(notdir $@)
+	$(MAKE) -C $(notdir $@) install
+	cp -a $(INSTALL_DIR)/$(LINUX_TUPLE)/lib* $(SYSROOT)
+	mkdir -p $(dir $@) && touch $@
+
+#
+# Newlib
+#
+
+stamps/build-binutils-newlib: $(srcdir)/arc-binutils-gdb stamps/check-write-permission
+	rm -rf $@ $(notdir $@)
+	mkdir $(notdir $@)
+	cd $(notdir $@) && $</configure \
+		--target=$(NEWLIB_TUPLE) \
+		--prefix=$(INSTALL_DIR) \
 		$(WERROR_FLAG)
 	$(MAKE) -C $(notdir $@)
 	$(MAKE) -C $(notdir $@) install
@@ -80,7 +250,7 @@ stamps/build-gcc-newlib-stage1: $(srcdir)/arc-gcc stamps/build-binutils-newlib
 	rm -rf $@ $(notdir $@)
 	mkdir $(notdir $@)
 	cd $(notdir $@) && $</configure \
-		--target=arc-elf32 \
+		--target=$(NEWLIB_TUPLE) \
 		$(CONFIGURE_HOST) \
 		--prefix=$(INSTALL_DIR) \
 		--disable-shared \
@@ -96,7 +266,9 @@ stamps/build-gcc-newlib-stage1: $(srcdir)/arc-gcc stamps/build-binutils-newlib
 		--disable-nls \
 		$(GCC_CHECKING_FLAGS) \
 		$(WERROR_FLAG) \
-		$(WITH_CPU)
+		$(WITH_CPU) \
+		--with-gnu-as \
+		--with-gnu-ld
 	$(MAKE) -C $(notdir $@) all-gcc
 	$(MAKE) -C $(notdir $@) install-gcc
 	mkdir -p $(dir $@) && touch $@
@@ -105,7 +277,7 @@ stamps/build-newlib: $(srcdir)/arc-newlib stamps/build-gcc-newlib-stage1
 	rm -rf $@ $(notdir $@)
 	mkdir $(notdir $@)
 	cd $(notdir $@) && $</configure \
-		--target=arc-elf32 \
+		--target=$(NEWLIB_TUPLE) \
 		$(CONFIGURE_HOST) \
 		$(MULTILIB_FLAGS) \
 		--prefix=$(INSTALL_DIR)
@@ -117,16 +289,17 @@ stamps/build-gcc-newlib-stage2: $(srcdir)/arc-gcc stamps/build-newlib
 	rm -rf $@ $(notdir $@)
 	mkdir $(notdir $@)
 	cd $(notdir $@) && $</configure \
-		--target=arc-elf32 \
+		--target=$(NEWLIB_TUPLE) \
 		$(CONFIGURE_HOST) \
 		--prefix=$(INSTALL_DIR) \
 		--disable-shared \
 		--disable-threads \
-		--enable-languages=c \
+		--enable-languages=c,c++ \
 		@with_system_zlib@ \
 		--disable-tls \
 		--with-newlib \
-		--with-headers=$(INSTALL_DIR)/arc-elf32/include \
+		--with-sysroot=$(INSTALL_DIR)/$(NEWLIB_TUPLE) \
+		--with-native-system-header-dir=/include \
 		--disable-libmudflap \
 		--disable-libssp \
 		--disable-libquadmath \
@@ -135,13 +308,15 @@ stamps/build-gcc-newlib-stage2: $(srcdir)/arc-gcc stamps/build-newlib
 		$(GCC_CHECKING_FLAGS) \
 		$(MULTILIB_FLAGS) \
 		$(WERROR_FLAG) \
-		$(WITH_CPU)
+		$(WITH_CPU) \
+		--with-gnu-as \
+		--with-gnu-ld
 	$(MAKE) -C $(notdir $@)
 	$(MAKE) -C $(notdir $@) install
 	mkdir -p $(dir $@) && touch $@
 
 .PHONY: check-gcc-newlib
-check-gcc-newlib: stamps/build-gcc-newlib
+check-gcc-newlib: stamps/build-gcc-newlib-stage2
 	export PATH=$(INSTALL_DIR)/bin:$(PATH) && \
 	export DEJAGNULIBS=$(srcdir)/arc-dejagnu && \
 	export ARC_SYSROOT=$(SYSROOT) && \
@@ -149,7 +324,7 @@ check-gcc-newlib: stamps/build-gcc-newlib
 	$(MAKE) check-gcc "RUNTESTFLAGS=--target_board=arc-sim"
 
 clean:
-	rm -rf build-* $(addprefix src/,$(PACKAGES)) stamps
+	rm -rf build-* $(addprefix src/,$(PACKAGES)) stamps autom4te.cache
 
 distclean: clean
 	rm -rf src

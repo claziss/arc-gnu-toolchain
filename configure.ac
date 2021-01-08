@@ -52,7 +52,7 @@ AS_IF([test "x$enable_linux" != xno],
 
 AC_ARG_ENABLE(werror,
         [AS_HELP_STRING([--enable-werror],
-		[controls if build is compiled with werror or not @<:@--disable-linux@:>@])],
+		[controls if build is compiled with werror or not @<:@--disable-werror@:>@])],
         [],
         [enable_werror=yes]
         )
@@ -61,9 +61,18 @@ AS_IF([test "x$enable_werror" != xno],
 	[AC_SUBST(werror_flag, --enable-werror)],
 	[AC_SUBST(werror_flag, --disable-werror)])
 
+AC_ARG_WITH(target,
+	[AS_HELP_STRING([--with-target=TARGET],
+		[Sets the ARC target @<:@--with-target=arc@:>@])],
+	[],
+	[with_target=arc]
+	)
+
+AC_SUBST(arc_target, $with_target)
+
 AC_ARG_WITH(cpu,
-	[AS_HELP_STRING([--with-cpu=archs],
-		[Sets the base ARC ISA, defaults to archs])],
+	[AS_HELP_STRING([--with-cpu=CPU],
+		[Sets the base ARC ISA @<:@--with-cpu=archs@:>@])],
 	[],
 	[with_cpu=archs]
 	)
@@ -75,8 +84,8 @@ AS_IF([test "x$with_host" != xdefault],
 	[AC_SUBST(configure_host,"")])
 
 AC_ARG_WITH(system-zlib,
-	[AS_HELP_STRING([--without-system-zlib],
-		[use the builtin copy of zlib from GCC])],
+	[AS_HELP_STRING([--with-system-zlib],
+		[use zlib from the system instead of the builtin copy from GCC @<:@--with-system-zlib@:>@])],
 	[],
 	[with_system_zlib=yes]
 	)
@@ -109,5 +118,19 @@ AS_IF([test "x$enable_gcc_checking" != xno],
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([scripts/wrapper/awk/awk], [chmod +x scripts/wrapper/awk])
 AC_CONFIG_FILES([scripts/wrapper/sed/sed], [chmod +x scripts/wrapper/sed])
+
+AC_ARG_WITH(linux-headers-src,
+	[AC_HELP_STRING([--with-linux-headers-src],
+		[Set linux-headers source path, use builtin source by default])],
+	[],
+	[with_linux_headers_src=default]
+	)
+
+AS_IF([test "x$with_linux_headers_src" != xdefault],
+	[AC_SUBST(with_linux_headers_src,$with_linux_headers_src)],
+	[AC_SUBST(with_linux_headers_src,"\$(srcdir)/linux-headers/include")])
+
+
+AC_OUTPUT
 
 AC_OUTPUT
