@@ -70,7 +70,7 @@ SIM_STAMP:= stamps/build-qemu
 else
 ifeq ($(SIM),nsim)
 SIM_PATH:=$(NSIM_HOME)/bin
-SIM_DEJAGNU=$(srcdir)/scripts/site.exp
+SIM_DEJAGNU=$(srcdir)/arc-toolchain/site.exp
 SIM_PREPARE:=PATH="$(SIM_PATH):$(INSTALL_DIR)/bin:$(PATH)" DEJAGNU="$(SIM_DEJAGNU)"
 SIM_STAMP:= stamps/build-nsim
 else
