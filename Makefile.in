@@ -2,6 +2,8 @@ srcdir := @abs_top_srcdir@
 builddir := @abs_top_builddir@
 INSTALL_DIR := @prefix@
 
+SIM:=nsim
+
 #FIXME! add WITH_FPU
 WITH_CPU ?= @WITH_CPU@
 SYSROOT := $(INSTALL_DIR)/sysroot
@@ -51,13 +53,30 @@ GLIBC_CXX_FOR_TARGET ?= $(LINUX_TUPLE)-g++
 
 NEWLIB_CC_FOR_TARGET ?= $(NEWLIB_TUPLE)-gcc
 NEWLIB_CXX_FOR_TARGET ?= $(NEWLIB_TUPLE)-g++
+NEWLIB_TARGET_BOARDS ?= arc-sim-nsimdrv
 
 CONFIGURE_HOST = @configure_host@
 
 all: @default_target@
 newlib: stamps/build-gcc-newlib-stage2
 linux: stamps/build-gcc-linux-stage2
+check: stamps/check-binutils-newlib stamps/check-gcc-newlib
 #TODO! linux-native gdb
+
+ifeq ($(SIM),qemu)
+SIM_PATH:=$(srcdir)/scripts/wrapper/qemu
+SIM_PREPARE:=PATH="$(SIM_PATH):$(INSTALL_DIR)/bin:$(PATH)" ARC_SYSROOT="$(SYSROOT)"
+SIM_STAMP:= stamps/build-qemu
+else
+ifeq ($(SIM),nsim)
+SIM_PATH:=$(NSIM_HOME)/bin
+SIM_DEJAGNU=$(srcdir)/scripts/site.exp
+SIM_PREPARE:=PATH="$(SIM_PATH):$(INSTALL_DIR)/bin:$(PATH)" DEJAGNU="$(SIM_DEJAGNU)"
+SIM_STAMP:= stamps/build-nsim
+else
+$(error "Only support SIM=nsim or SIM=qemu (default).")
+endif
+endif
 
 stamps/check-write-permission:
 	mkdir -p $(INSTALL_DIR)/.test || \
@@ -322,6 +341,20 @@ check-gcc-newlib: stamps/build-gcc-newlib-stage2
 	export ARC_SYSROOT=$(SYSROOT) && \
 	cd build-gcc-newlib && \
 	$(MAKE) check-gcc "RUNTESTFLAGS=--target_board=arc-sim"
+
+stamps/check-binutils-newlib: stamps/build-gcc-newlib-stage2
+	$(SIM_PREPARE) $(MAKE) -C build-binutils-newlib check-gas check-ld check-binutils -k "RUNTESTFLAGS=--target_board='$(NEWLIB_TARGET_BOARDS)'" || true
+	date > $@
+
+stamps/check-gcc-newlib: stamps/build-gcc-newlib-stage2
+	$(SIM_PREPARE) PATH=`pwd`/build-gcc-newlib-stage2/gcc:$(PATH) $(MAKE) -C build-gcc-newlib-stage2 check-gcc "RUNTESTFLAGS=--target_board='$(NEWLIB_TARGET_BOARDS)'"
+	mkdir -p $(dir $@)
+	date > $@
+
+#report-binutils-newlib: stamps/check-binutils-newlib
+#	$(srcdir)/scripts/testsuite-filter binutils newlib \
+#	    $(srcdir)/test/allowlist \
+#	    `find build-binutils-newlib/ -name *.sum |paste -sd "," -`
 
 clean:
 	rm -rf build-* $(addprefix src/,$(PACKAGES)) stamps autom4te.cache
