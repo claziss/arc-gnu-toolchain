@@ -207,6 +207,7 @@ stamps/build-gcc-linux-stage1: $(srcdir)/arc-gcc stamps/build-binutils-linux \
 		--disable-lto \
 		--src=$(gccsrcdir) \
 		$(GCC_CHECKING_FLAGS) \
+		$(WITH_CPU) \
 		$(MULTILIB_FLAGS) \
 		CFLAGS_FOR_TARGET="-O2 $(CFLAGS_FOR_TARGET)" \
 		CXXFLAGS_FOR_TARGET="-O2 $(CXXFLAGS_FOR_TARGET)" \
@@ -238,6 +239,7 @@ stamps/build-gcc-linux-stage2: $(srcdir)/arc-gcc stamps/build-glibc-linux \
 		--disable-bootstrap \
 		--src=$(gccsrcdir) \
 		$(GCC_CHECKING_FLAGS) \
+		$(WITH_CPU) \
 		$(MULTILIB_FLAGS) \
 		$(WITH_ABI) \
 		CFLAGS_FOR_TARGET="-O2 $(CFLAGS_FOR_TARGET)" \
